@@ -39,7 +39,7 @@ color3 888888
 color4 666666
 
 #change the next line how you need it
-lua_load ./conky.lua
+lua_load $HOME/.config/conky/conky-config/conky.lua
 lua_draw_hook_post main
 
 TEXT
