@@ -34,42 +34,6 @@ function list_ext_mountpoints()
 	return t
 end
 
-function draw_arc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
-	local startRad = (startDeg - 90) * (math.pi/180.0)
-	local endRad = (endDeg + startDeg - 90) * (math.pi/180.0)
-	
-	cairo_set_line_width(cr, width)
-	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
-	cairo_arc(cr, x, y, radius, startRad, endRad)
-	cairo_stroke(cr)
-end
-function draw_negarc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
-	local startRad = (startDeg - 90) * (math.pi/180.0)
-	local endRad = (startDeg - 90 - endDeg) * (math.pi/180.0)
-	
-	cairo_set_line_width(cr, width)
-	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
-	cairo_arc_negative(cr, x, y, radius, startRad, endRad)
-	cairo_stroke(cr)
-end
-
-function draw_rect(cr, x, y, width, height, color, alpha)
-	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
-	cairo_set_line_width(cr, 0)
-	cairo_rectangle(cr, x, y - height, width, height)
-	cairo_fill(cr)
-	cairo_stroke(cr)
-end
-
-function draw_text(cr, x, y, value, size, weight, color, alpha)
-    cairo_select_font_face(cr, 'ubuntu', CAIRO_FONT_SLANT_NORMAL, weight)
-    cairo_set_font_size(cr, size)
-    cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
-	cairo_move_to(cr, x, y)
-    cairo_show_text(cr, value)
-	cairo_stroke(cr)
-end
-
 --------------------------------------------------------------------------------
 -- CLASS Graph
 Graph = {
@@ -80,7 +44,6 @@ Graph = {
 	x = 85,
 	y = 0,
 	logarithm = false,
-	reverse = false,
 	background = {
 		color = colorGraphBackground,
 		alpha = alphaGraphBackground
@@ -117,11 +80,38 @@ function Graph:new(values)
 	return setmetatable(obj, self)
 end
 function Graph:drawArc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
-	if self.reverse then
-		draw_negarc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
-	else
-		draw_arc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
+	local startRad = (startDeg - 90) * (math.pi/180.0)
+	local endRad = (endDeg + startDeg - 90) * (math.pi/180.0)
+	
+	cairo_set_line_width(cr, width)
+	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
+	cairo_arc(cr, x, y, radius, startRad, endRad)
+	cairo_stroke(cr)
+end
+function Graph:drawText(cr, x, y, value, size, weight, color, alpha)
+    cairo_select_font_face(cr, 'ubuntu', CAIRO_FONT_SLANT_NORMAL, weight)
+    cairo_set_font_size(cr, size)
+    cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
+	cairo_move_to(cr, x, y)
+    cairo_show_text(cr, value)
+	cairo_stroke(cr)
+end
+function Graph:displayCaption(cr, x, y)
+	if self.caption.value ~= '' then
+		x = x or 0
+		y = y or 0
+		self:drawText(cr, self.x + self.caption.margin + x, self.y + y, self.caption.value, self.caption.size, self.caption.weight, self.caption.color, self.caption.alpha)
 	end
+end
+function Graph:getValues()
+	local value = self.value
+	local max_value = self.max_value
+	if self.logarithm ~= false then
+		local base = self.logarithm.base or 10
+		max_value = log(max_value + 1.0, base)
+		value = log(self.value + 1.0, base)
+	end
+	return value, max_value
 end
 function Graph:update(cr)
 	if self.name ~= '' then
@@ -133,6 +123,7 @@ function Graph:update(cr)
 	end
 	self:display(cr)
 end
+
 GaugeGraph = Graph:new({
 	radius = 20,
 	thickness = 15,
@@ -140,101 +131,56 @@ GaugeGraph = Graph:new({
 	end_deg = 270
 })
 function GaugeGraph:display(cr)
-	local max_value = self.max_value
-	if self.logarithm ~= false then
-		local base = self.logarithm.base or 10
-		max_value = log(max_value + 1.0, base)
-		self.value = log(self.value + 1.0, base)
-	end
+	local value, max_value = self:getValues()
 
 	-- background ring
 	self:drawArc(cr, self.x, self.y, self.radius, self.start_deg, self.end_deg, self.thickness, self.background.color, self.background.alpha)
 
 	-- arc of value
-	self:drawArc(cr, self.x, self.y, self.radius, self.start_deg, (self.end_deg * self.value)/max_value, self.thickness, self.highlight.color, self.highlight.alpha)
+	self:drawArc(cr, self.x, self.y, self.radius, self.start_deg, (self.end_deg * value)/max_value, self.thickness, self.highlight.color, self.highlight.alpha)
 
-	-- hand
-	--[[
-	start_arc = (graph_unit_angle * val) - (graph_unit_thickness * 2)
-	stop_arc = (graph_unit_angle * val)
-	cairo_arc(cr, x, y, graph_radius, angle_to_position(graph_start_angle, start_arc), angle_to_position(graph_start_angle, stop_arc))
-	cairo_set_source_rgba(cr, rgb_to_r_g_b(hand_fg_colour, hand_fg_alpha))
-	cairo_stroke(cr)
-
-	-- graduations marks
-	local graduation_radius = data['graduation_radius']
-	local graduation_thickness, graduation_mark_thickness = data['graduation_thickness'], data['graduation_mark_thickness']
-	local graduation_unit_angle = data['graduation_unit_angle']
-	local graduation_fg_colour, graduation_fg_alpha = data['graduation_fg_colour'], data['graduation_fg_alpha']
-	if data.graduation_radius > 0 and graduation_thickness > 0 and graduation_unit_angle > 0 then
-		local nb_graduation = graph_end_angle / graduation_unit_angle
-		local i = 0
-		while i < nb_graduation do
-			cairo_set_line_width(cr, graduation_thickness)
-			start_arc = (graduation_unit_angle * i) - (graduation_mark_thickness / 2)
-			stop_arc = (graduation_unit_angle * i) + (graduation_mark_thickness / 2)
-			cairo_arc(cr, x, y, data.graduation_radius, angle_to_position(graph_start_angle, start_arc), angle_to_position(graph_start_angle, stop_arc))
-			cairo_set_source_rgba(cr,rgb_to_r_g_b(graduation_fg_colour,graduation_fg_alpha))
-			cairo_stroke(cr)
-			cairo_set_line_width(cr, graph_thickness)
-			i = i + 1
-		end
-	end
-	-- text
-	local txt_radius = data.txt_radius
-	local txt_weight, txt_size = data['txt_weight'], data['txt_size']
-	local txt_fg_colour, txt_fg_alpha = data['txt_fg_colour'], data['txt_fg_alpha']
-	local movex = txt_radius * math.cos(angle_to_position(graph_start_angle, (data.graph_end_angle * value)/max_value)) * 1.15
-	local movey = txt_radius * math.sin(angle_to_position(graph_start_angle, (data.graph_end_angle * value)/max_value)) * 1.05
-	if data.reverse then
-		movey = movey *-1
-	end
-
-	cairo_select_font_face (cr, "ubuntu", CAIRO_FONT_SLANT_NORMAL, txt_weight)
-	cairo_set_font_size (cr, txt_size)
-	cairo_set_source_rgba (cr, rgb_to_r_g_b(txt_fg_colour, txt_fg_alpha))
-	cairo_move_to (cr, x + movex, y + movey)
-	cairo_show_text (cr, txt_value)
-	cairo_stroke (cr)
-	]]
-
-	-- caption
-    if self.caption.value ~= '' then
-		draw_text(cr, self.x + self.caption.margin, self.y + self.radius + self.caption.size/4, self.caption.value, self.caption.size, self.caption.weight, self.caption.color, self.caption.alpha)
-	end
+	self:displayCaption(cr, 0, self.radius + self.caption.size/4)
 end
+
+ReverseGaugeGraph = GaugeGraph:new()
+function ReverseGaugeGraph:drawArc(cr, x, y, radius, startDeg, endDeg, width, color, alpha)
+	local startRad = (startDeg - 90) * (math.pi/180.0)
+	local endRad = (startDeg - 90 - endDeg) * (math.pi/180.0)
+	
+	cairo_set_line_width(cr, width)
+	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
+	cairo_arc_negative(cr, x, y, radius, startRad, endRad)
+	cairo_stroke(cr)
+end
+
 BarGraph = Graph:new({
 	width = 70,
 	height = 15
 })
+function BarGraph:drawRect(cr, x, y, width, height, color, alpha)
+	cairo_set_source_rgba(cr, rgb_to_r_g_b(color, alpha))
+	cairo_set_line_width(cr, 0)
+	cairo_rectangle(cr, x, y - height, width, height)
+	cairo_fill(cr)
+	cairo_stroke(cr)
+end
 function BarGraph:display(cr)
-	local max_value = self.max_value
-	if self.logarithm ~= false then
-		local base = self.logarithm.base or 10
-		max_value = log(max_value + 1.0, base)
-		self.value = log(self.value + 1.0, base)
-	end
+	local value, max_value = self:getValues()
 	
 	-- background
-	draw_rect(cr, self.x, self.y, self.width, self.height, self.background.color, self.background.alpha)
+	self:drawRect(cr, self.x, self.y, self.width, self.height, self.background.color, self.background.alpha)
 	-- value
-	draw_rect(cr, self.x, self.y, (self.width * self.value)/max_value, self.height, self.highlight.color, self.highlight.alpha)
+	self:drawRect(cr, self.x, self.y, (self.width * value)/max_value, self.height, self.highlight.color, self.highlight.alpha)
     -- caption
-    if self.caption.value ~= '' then
-		draw_text(cr, self.x + self.width + self.caption.margin, self.y - self.height/2 + self.caption.size/4, self.caption.value, self.caption.size, self.caption.weight, self.caption.color, self.caption.alpha)
-	end
+	self:displayCaption(cr, self.width, self.caption.size/4 - self.height/2)
 end
+
 GraphGradiation = GaugeGraph:new({
 	count = 59,
 	graduation_deg = 1.5
 })
 function GraphGradiation:display(cr)
-	local max_value = self.max_value
-	if self.logarithm ~= false then
-		local base = self.logarithm.base or 10
-		max_value = log(max_value + 1.0, base)
-		self.value = log(self.value + 1.0, base)
-	end
+	local value, max_value = self:getValues()
 	
 	-- background ring
 	for i = 0, self.count do
@@ -242,13 +188,8 @@ function GraphGradiation:display(cr)
 	end
 	
 	-- arc of value
-	for i = 0, (self.count * self.value)/max_value do
+	for i = 0, (self.count * value)/max_value do
 		self:drawArc(cr, self.x, self.y, self.radius, self.start_deg + i * (self.end_deg / self.count), self.graduation_deg, self.thickness, self.highlight.color, self.highlight.alpha)
-	end
-
-	-- caption
-    if self.caption.value ~= '' then
-		draw_text(cr, self.x + self.caption.margin, self.y + self.radius + self.caption.size/4, self.caption.value, self.caption.size, self.caption.weight, self.caption.color, self.caption.alpha)
 	end
 end
 --------------------------------------------------------------------------------
@@ -266,8 +207,8 @@ config = {
 	GaugeGraph:new({name='swapperc', y=vtop_mem, radius=25}),
 	GaugeGraph:new({name='downspeedf', arg='eth0', y=vtop_net, radius=45, logarithm = {base = 10}, end_deg = 180, max_value=1000000}),
 	GaugeGraph:new({name='downspeedf', arg='wlan0', y=vtop_net, radius=25, logarithm = {base = 10}, end_deg = 180, max_value=1000000}),
-	GaugeGraph:new({name='upspeedf', arg='eth0', x=Graph.x+5, y=vtop_net, radius=45, logarithm = {base = 10}, reverse=true, start_deg = 90, end_deg = 90, max_value=1000000}),
-	GaugeGraph:new({name='upspeedf', arg='wlan0', x=Graph.x+5, y=vtop_net, radius=25, logarithm = {base = 10}, reverse=true, start_deg = 90, end_deg = 90, max_value=1000000}),
+	ReverseGaugeGraph:new({name='upspeedf', arg='eth0', x=Graph.x+5, y=vtop_net, radius=45, logarithm = {base = 10}, start_deg = 90, end_deg = 90, max_value=1000000}),
+	ReverseGaugeGraph:new({name='upspeedf', arg='wlan0', x=Graph.x+5, y=vtop_net, radius=25, logarithm = {base = 10}, start_deg = 90, end_deg = 90, max_value=1000000}),
 	GaugeGraph:new({name='battery_percent', arg='BAT0', y=vtop_bat, radius=25}),
 	GaugeGraph:new({name='time', arg='%I', x=160, y=vtop_clock, radius=80, thickness=5, start_deg = 0, end_deg = 360, max_value=12}),
 	GaugeGraph:new({name='time', arg='%M', x=160, y=vtop_clock, radius=92, thickness=3, start_deg = 0, end_deg = 360, max_value=59}),
@@ -278,15 +219,12 @@ config = {
 -------------------------------------------------------------------------------
 --                                                                         MAIN
 function conky_main()
-	if conky_window == nil then 
-		return
-	end
+	if conky_window == nil then return end
 
 	local cs = cairo_xlib_surface_create(conky_window.display, conky_window.drawable, conky_window.visual, conky_window.width, conky_window.height)
 	local display = cairo_create(cs)
 
-	--if tonumber(conky_parse('${updates}')) > 5 then
-    for i,entry in ipairs(config) do
+	for i,entry in ipairs(config) do
 		entry:update(display)
 	end
 	
@@ -308,8 +246,6 @@ function conky_main()
 			thickness = 30 / table.getn(mountpoints.int),
 			end_deg = (table.getn(mountpoints.ext) > 0) and 180 or 270
 		})
-		--graph.caption = {}
-		--graph.caption.__index = Graph.caption
 		graph.caption.value = mountpoint
 		graph:update(display)
 		graph = nil
@@ -333,7 +269,6 @@ function conky_main()
 		graph:update(display)
 		graph = nil
 	end
-	--end
 
 	cairo_destroy(display)
 	cairo_surface_destroy(cs)
